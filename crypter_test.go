@@ -29,6 +29,8 @@ import (
 	"reflect"
 	"regexp"
 	"testing"
+
+	"github.com/go-jose/go-jose/v3/x25519"
 )
 
 // We generate only a single RSA and EC key for testing, speeds up tests.
@@ -39,6 +41,9 @@ var ecTestKey384, _ = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 var ecTestKey521, _ = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 
 var ed25519PublicKey, ed25519PrivateKey, _ = ed25519.GenerateKey(rand.Reader)
+
+var x25519TestKey, _ = x25519.GenerateKey(rand.Reader)
+var x25519PublicKey, _ = x25519TestKey.Public()
 
 func RoundtripJWE(keyAlg KeyAlgorithm, encAlg ContentEncryption, compressionAlg CompressionAlgorithm, serializer func(*JSONWebEncryption) (string, error), corrupter func(*JSONWebEncryption) bool, aad []byte, encryptionKey interface{}, decryptionKey interface{}) error {
 	var rcpt Recipient
@@ -671,6 +676,14 @@ func generateTestKeys(keyAlg KeyAlgorithm, encAlg ContentEncryption) []testKey {
 				dec: &JSONWebKey{KeyID: "test", Key: ecTestKey256},
 				enc: &JSONWebKey{KeyID: "test", Key: &ecTestKey256.PublicKey},
 			},
+			{
+				dec: x25519TestKey,
+				enc: x25519PublicKey,
+			},
+			{
+				dec: &JSONWebKey{KeyID: "test", Key: x25519TestKey},
+				enc: &JSONWebKey{KeyID: "test", Key: x25519PublicKey},
+			},
 		}
 	case A128GCMKW, A128KW:
 		return symmetricTestKey(16)
@@ -710,19 +723,20 @@ var (
 	symKey64, _, _ = randomKeyGenerator{size: 64}.genKey()
 
 	encrypters = map[string]Encrypter{
-		"OAEPAndGCM":          mustEncrypter(RSA_OAEP, A128GCM, &rsaTestKey.PublicKey),
-		"PKCSAndGCM":          mustEncrypter(RSA1_5, A128GCM, &rsaTestKey.PublicKey),
-		"OAEPAndCBC":          mustEncrypter(RSA_OAEP, A128CBC_HS256, &rsaTestKey.PublicKey),
-		"PKCSAndCBC":          mustEncrypter(RSA1_5, A128CBC_HS256, &rsaTestKey.PublicKey),
-		"DirectGCM128":        mustEncrypter(DIRECT, A128GCM, symKey16),
-		"DirectCBC128":        mustEncrypter(DIRECT, A128CBC_HS256, symKey32),
-		"DirectGCM256":        mustEncrypter(DIRECT, A256GCM, symKey32),
-		"DirectCBC256":        mustEncrypter(DIRECT, A256CBC_HS512, symKey64),
-		"AESKWAndGCM128":      mustEncrypter(A128KW, A128GCM, symKey16),
-		"AESKWAndCBC256":      mustEncrypter(A256KW, A256GCM, symKey32),
-		"ECDHOnP256AndGCM128": mustEncrypter(ECDH_ES, A128GCM, &ecTestKey256.PublicKey),
-		"ECDHOnP384AndGCM128": mustEncrypter(ECDH_ES, A128GCM, &ecTestKey384.PublicKey),
-		"ECDHOnP521AndGCM128": mustEncrypter(ECDH_ES, A128GCM, &ecTestKey521.PublicKey),
+		"OAEPAndGCM":            mustEncrypter(RSA_OAEP, A128GCM, &rsaTestKey.PublicKey),
+		"PKCSAndGCM":            mustEncrypter(RSA1_5, A128GCM, &rsaTestKey.PublicKey),
+		"OAEPAndCBC":            mustEncrypter(RSA_OAEP, A128CBC_HS256, &rsaTestKey.PublicKey),
+		"PKCSAndCBC":            mustEncrypter(RSA1_5, A128CBC_HS256, &rsaTestKey.PublicKey),
+		"DirectGCM128":          mustEncrypter(DIRECT, A128GCM, symKey16),
+		"DirectCBC128":          mustEncrypter(DIRECT, A128CBC_HS256, symKey32),
+		"DirectGCM256":          mustEncrypter(DIRECT, A256GCM, symKey32),
+		"DirectCBC256":          mustEncrypter(DIRECT, A256CBC_HS512, symKey64),
+		"AESKWAndGCM128":        mustEncrypter(A128KW, A128GCM, symKey16),
+		"AESKWAndCBC256":        mustEncrypter(A256KW, A256GCM, symKey32),
+		"ECDHOnP256AndGCM128":   mustEncrypter(ECDH_ES, A128GCM, &ecTestKey256.PublicKey),
+		"ECDHOnP384AndGCM128":   mustEncrypter(ECDH_ES, A128GCM, &ecTestKey384.PublicKey),
+		"ECDHOnP521AndGCM128":   mustEncrypter(ECDH_ES, A128GCM, &ecTestKey521.PublicKey),
+		"ECDHOnX25519AndGCM128": mustEncrypter(ECDH_ES, A128GCM, x25519PublicKey),
 	}
 )
 
@@ -853,6 +867,25 @@ func BenchmarkEncrypt64MBWithECDHOnP521AndGCM128(b *testing.B) {
 	benchEncrypt("64MB", "ECDHOnP521AndGCM128", b)
 }
 
+func BenchmarkEncrypt1BWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchEncrypt("1B", "ECDHOnX25519AndGCM128", b)
+}
+func BenchmarkEncrypt64BWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchEncrypt("64B", "ECDHOnX25519AndGCM128", b)
+}
+func BenchmarkEncrypt1KBWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchEncrypt("1KB", "ECDHOnX25519AndGCM128", b)
+}
+func BenchmarkEncrypt64KBWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchEncrypt("64KB", "ECDHOnX25519AndGCM128", b)
+}
+func BenchmarkEncrypt1MBWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchEncrypt("1MB", "ECDHOnX25519AndGCM128", b)
+}
+func BenchmarkEncrypt64MBWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchEncrypt("64MB", "ECDHOnX25519AndGCM128", b)
+}
+
 func benchEncrypt(chunkKey, primKey string, b *testing.B) {
 	data, ok := chunks[chunkKey]
 	if !ok {
@@ -890,6 +923,8 @@ var (
 		"ECDHOnP256AndGCM128": ecTestKey256,
 		"ECDHOnP384AndGCM128": ecTestKey384,
 		"ECDHOnP521AndGCM128": ecTestKey521,
+
+		"ECDHOnX25519AndGCM128": x25519TestKey,
 	}
 )
 
@@ -1018,6 +1053,25 @@ func BenchmarkDecrypt1MBWithECDHOnP521AndGCM128(b *testing.B) {
 }
 func BenchmarkDecrypt64MBWithECDHOnP521AndGCM128(b *testing.B) {
 	benchDecrypt("64MB", "ECDHOnP521AndGCM128", b)
+}
+
+func BenchmarkDecrypt1BWithECDHOnX25519AndGCM128(b *testing.B) {
+	benchDecrypt("1B", "ECDHOnX25519AndGCM128", b)
+}
+func BenchmarkDecrypt64BWithECDHOnX25119AndGCM128(b *testing.B) {
+	benchDecrypt("64B", "ECDHOnX25119AndGCM128", b)
+}
+func BenchmarkDecrypt1KBWithECDHOnX25119AndGCM128(b *testing.B) {
+	benchDecrypt("1KB", "ECDHOnX25119AndGCM128", b)
+}
+func BenchmarkDecrypt64KBWithECDHOnX25119AndGCM128(b *testing.B) {
+	benchDecrypt("64KB", "ECDHOnX25119AndGCM128", b)
+}
+func BenchmarkDecrypt1MBWithECDHOnX25119AndGCM128(b *testing.B) {
+	benchDecrypt("1MB", "ECDHOnX25119AndGCM128", b)
+}
+func BenchmarkDecrypt64MBWithECDHOnX25119AndGCM128(b *testing.B) {
+	benchDecrypt("64MB", "ECDHOnX25119AndGCM128", b)
 }
 
 func benchDecrypt(chunkKey, primKey string, b *testing.B) {

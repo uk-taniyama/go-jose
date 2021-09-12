@@ -27,6 +27,7 @@ import (
 	"fmt"
 
 	jose "github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v3/x25519"
 )
 
 // NewSigningKey generates a keypair for corresponding SignatureAlgorithm.
@@ -99,6 +100,14 @@ func NewEncryptionKey(alg jose.KeyAlgorithm, bits int) (crypto.PublicKey, crypto
 		}
 		return key.Public(), key, err
 	case jose.ECDH_ES, jose.ECDH_ES_A128KW, jose.ECDH_ES_A192KW, jose.ECDH_ES_A256KW:
+		if bits == 255 {
+			key, err := x25519.GenerateKey(rand.Reader)
+			if err != nil {
+				return nil, nil, err
+			}
+			pubKey, err := key.Public()
+			return pubKey, key, err
+		}
 		var crv elliptic.Curve
 		switch bits {
 		case 0, 256:

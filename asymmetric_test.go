@@ -392,3 +392,67 @@ func TestInvalidAlgorithmEC(t *testing.T) {
 		t.Fatal("should not accept invalid/unsupported algorithm")
 	}
 }
+
+func TestInvalidAlgorithmsX25519(t *testing.T) {
+	_, err := newECDHRecipient2("XYZ", nil)
+	if err != ErrUnsupportedAlgorithm {
+		t.Error("should return error on invalid algorithm")
+	}
+
+	// _, err = newECDSASigner("XYZ", nil)
+	// if err != ErrUnsupportedAlgorithm {
+	// 	t.Error("should return error on invalid algorithm")
+	// }
+
+	enc := new(x25519EncrypterVerifier)
+	enc.publicKey, _ = x25519TestKey.Public()
+	_, err = enc.encryptKey([]byte{}, "XYZ")
+	if err != ErrUnsupportedAlgorithm {
+		t.Error("should return error on invalid algorithm")
+	}
+}
+
+func TestInvalidX25519KeyGen(t *testing.T) {
+	gen := x25519KeyGenerator{
+		size:      16,
+		algID:     "A128GCM",
+		publicKey: x25519PublicKey,
+	}
+
+	if gen.keySize() != 16 {
+		t.Error("ec key generator reported incorrect key size")
+	}
+
+	_, _, err := gen.genKey()
+	if err != nil {
+		t.Error("ec key generator failed to generate key", err)
+	}
+}
+
+func TestInvalidX25519Decrypt(t *testing.T) {
+	dec := x25519DecrypterSigner{
+		privateKey: x25519TestKey,
+	}
+
+	generator := randomKeyGenerator{size: 16}
+
+	// Missing epk header
+	headers := rawHeader{}
+
+	if err := headers.set(headerAlgorithm, ECDH_ES); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dec.decryptKey(headers, nil, generator); err == nil {
+		t.Error("ec decrypter accepted object with missing epk header")
+	}
+
+	// Invalid epk header
+	if err := headers.set(headerEPK, &JSONWebKey{}); err == nil {
+		t.Fatal("epk header should be invalid")
+	}
+
+	if _, err := dec.decryptKey(headers, nil, generator); err == nil {
+		t.Error("ec decrypter accepted object with invalid epk header")
+	}
+}

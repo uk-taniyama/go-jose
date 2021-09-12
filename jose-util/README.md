@@ -66,6 +66,9 @@ Generates a key pair, either for signing/verification or encryption/decryption. 
     # Generate keys for encryption (for ECDH-ES)
     jose-util generate-key --use enc --alg ECDH-ES+A128KW
 
+    # Generate keys for encryption (for ECDH-ES(x25519))
+    jose-util generate-key --use enc --alg ECDH-ES+A128KW --size 255
+
 ### Encrypt
 
 Takes a plaintext as input, encrypts, and prints the encrypted message.

@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/go-jose/go-jose/v3/json"
+	"github.com/go-jose/go-jose/v3/x25519"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -1007,6 +1008,8 @@ func TestJWKIsPublic(t *testing.T) {
 		{&rsa.PrivateKey{PublicKey: rsaPub, D: bigInt, Primes: []*big.Int{bigInt, bigInt}}, false},
 		{ed25519PublicKey, true},
 		{ed25519PrivateKey, false},
+		{x25519PublicKey, true},
+		{x25519TestKey, false},
 	}
 
 	for _, tc := range cases {
@@ -1023,6 +1026,8 @@ func TestJWKValid(t *testing.T) {
 	rsaPub := rsa.PublicKey{N: bigInt, E: 1}
 	edPubEmpty := ed25519.PublicKey([]byte{})
 	edPrivEmpty := ed25519.PublicKey([]byte{})
+	x25519PubEmpty := x25519.PublicKey([]byte{})
+	x25519PrivEmpty := x25519.PrivateKey([]byte{})
 
 	cases := []struct {
 		key              interface{}
@@ -1041,6 +1046,10 @@ func TestJWKValid(t *testing.T) {
 		{ed25519PrivateKey, true},
 		{edPubEmpty, false},
 		{edPrivEmpty, false},
+		{x25519PublicKey, true},
+		{x25519TestKey, true},
+		{x25519PubEmpty, false},
+		{x25519PrivEmpty, false},
 	}
 
 	for _, tc := range cases {
@@ -1179,4 +1188,69 @@ func TestJWKPaddingY(t *testing.T) {
 	if jwk.Valid() {
 		t.Errorf("Expected key to be invalid, but it was valid.")
 	}
+}
+
+func TestX25519(t *testing.T) {
+	// RFC 8037 CFRG ECDH and Signatures in JOSE
+	// 	A.6.  ECDH-ES with X25519
+	//  The public key to encrypt to is:
+	pubJWKText := `{"kty":"OKP","crv":"X25519","kid":"Bob","x":"3p7bfXt9wbTTW2HC7OQ1Nz-DQ8hbeGdNrfx-FG-IK08"}`
+
+	// RFC 7748 Elliptic Curves for Security
+	//  6.  Diffie-Hellman
+	//  6.1.  Curve25519
+	//  Bob's private key, b:
+	priv := "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"
+	//  Bob's public key, X25519(b, 9):
+	pub := "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f"
+
+	// sha256
+	thumbprint := "82242a8a04ff20a72ecc7974155277939b6cdff4d6340c6fb02d3c519b1f70cf"
+
+	privBytes, err := hex.DecodeString(priv)
+	require.NoError(t, err)
+
+	// private JSONWebKey -> string
+	privJwk := JSONWebKey{
+		KeyID: "Bob",
+		Key:   x25519.PrivateKey(privBytes),
+	}
+	assert.IsType(t, x25519.PrivateKey{}, privJwk.Key)
+	assert.Equal(t, false, privJwk.IsPublic())
+	assert.Equal(t, true, privJwk.Valid())
+	privJwkText, err := privJwk.MarshalJSON()
+	require.NoError(t, err)
+
+	// private string -> JSONWebKey
+	privJwk2 := JSONWebKey{}
+	err = privJwk2.UnmarshalJSON(privJwkText)
+	require.NoError(t, err)
+	assert.IsType(t, x25519.PrivateKey{}, privJwk.Key)
+	assert.Equal(t, false, privJwk2.IsPublic())
+	assert.Equal(t, true, privJwk2.Valid())
+	assert.Equal(t, priv, hex.EncodeToString(privJwk2.Key.(x25519.PrivateKey)))
+
+	pubJWKText2, err := privJwk2.Public().MarshalJSON()
+	require.NoError(t, err)
+	assert.JSONEq(t, pubJWKText, string(pubJWKText2))
+
+	// string -> JSONWebKey
+	pubJwk := JSONWebKey{}
+	err = pubJwk.UnmarshalJSON([]byte(pubJWKText))
+	require.NoError(t, err)
+	assert.IsType(t, x25519.PublicKey{}, pubJwk.Key)
+	assert.Equal(t, pub, hex.EncodeToString(pubJwk.Key.(x25519.PublicKey)))
+	assert.Equal(t, true, pubJwk.IsPublic())
+	assert.Equal(t, true, pubJwk.Valid())
+
+	// JSONWebKey -> string
+	pubKey2, err := pubJwk.MarshalJSON()
+	require.NoError(t, err)
+	assert.JSONEq(t, pubJWKText, string(pubKey2))
+
+	// thumbprint
+	thumbprint2, err := pubJwk.Thumbprint(crypto.SHA256)
+	require.NoError(t, err)
+	thumbprint3 := hex.EncodeToString(thumbprint2)
+	assert.Equal(t, thumbprint, thumbprint3)
 }

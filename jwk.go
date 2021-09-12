@@ -36,6 +36,7 @@ import (
 	"strings"
 
 	"github.com/go-jose/go-jose/v3/json"
+	"github.com/go-jose/go-jose/v3/x25519"
 )
 
 // rawJSONWebKey represents a public or private key in JWK format, used for parsing/serializing.
@@ -96,12 +97,16 @@ func (k JSONWebKey) MarshalJSON() ([]byte, error) {
 	switch key := k.Key.(type) {
 	case ed25519.PublicKey:
 		raw = fromEdPublicKey(key)
+	case x25519.PublicKey:
+		raw, err = fromX25519PublicKey(key)
 	case *ecdsa.PublicKey:
 		raw, err = fromEcPublicKey(key)
 	case *rsa.PublicKey:
 		raw = fromRsaPublicKey(key)
 	case ed25519.PrivateKey:
 		raw, err = fromEdPrivateKey(key)
+	case x25519.PrivateKey:
+		raw, err = fromX25519PrivateKey(key)
 	case *ecdsa.PrivateKey:
 		raw, err = fromEcPrivateKey(key)
 	case *rsa.PrivateKey:
@@ -224,6 +229,16 @@ func (k *JSONWebKey) UnmarshalJSON(data []byte) (err error) {
 				}
 			} else {
 				key, err = raw.edPublicKey()
+				keyPub = key
+			}
+		} else if raw.Crv == "X25519" && raw.X != nil {
+			if raw.D != nil {
+				key, err = raw.x25519PrivateKey()
+				if err == nil {
+					keyPub, err = key.(x25519.PrivateKey).Public()
+				}
+			} else {
+				key, err = raw.x25519PublicKey()
 				keyPub = key
 			}
 		} else {
@@ -371,6 +386,15 @@ func edThumbprintInput(ed ed25519.PublicKey) (string, error) {
 		newFixedSizeBuffer(ed, 32).base64()), nil
 }
 
+func x25519ThumbprintInput(key x25519.PublicKey) (string, error) {
+	crv := "X25519"
+	if len(key) > 32 {
+		return "", errors.New("go-jose/go-jose: invalid elliptic key (too large)")
+	}
+	return fmt.Sprintf(edThumbprintTemplate, crv,
+		newFixedSizeBuffer(key, 32).base64()), nil
+}
+
 // Thumbprint computes the JWK Thumbprint of a key using the
 // indicated hash algorithm.
 func (k *JSONWebKey) Thumbprint(hash crypto.Hash) ([]byte, error) {
@@ -389,6 +413,13 @@ func (k *JSONWebKey) Thumbprint(hash crypto.Hash) ([]byte, error) {
 		input, err = rsaThumbprintInput(key.N, key.E)
 	case ed25519.PrivateKey:
 		input, err = edThumbprintInput(ed25519.PublicKey(key[32:]))
+	case x25519.PrivateKey:
+		pubKey, err := key.Public()
+		if err != nil {
+			input, err = x25519ThumbprintInput(pubKey)
+		}
+	case x25519.PublicKey:
+		input, err = x25519ThumbprintInput(key)
 	default:
 		return nil, fmt.Errorf("go-jose/go-jose: unknown key type '%s'", reflect.TypeOf(key))
 	}
@@ -405,7 +436,7 @@ func (k *JSONWebKey) Thumbprint(hash crypto.Hash) ([]byte, error) {
 // IsPublic returns true if the JWK represents a public key (not symmetric, not private).
 func (k *JSONWebKey) IsPublic() bool {
 	switch k.Key.(type) {
-	case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey:
+	case *ecdsa.PublicKey, *rsa.PublicKey, ed25519.PublicKey, x25519.PublicKey:
 		return true
 	default:
 		return false
@@ -425,6 +456,8 @@ func (k *JSONWebKey) Public() JSONWebKey {
 		ret.Key = key.Public()
 	case ed25519.PrivateKey:
 		ret.Key = key.Public()
+	case x25519.PrivateKey:
+		ret.Key, _ = key.Public()
 	default:
 		return JSONWebKey{} // returning invalid key
 	}
@@ -459,6 +492,14 @@ func (k *JSONWebKey) Valid() bool {
 		}
 	case ed25519.PrivateKey:
 		if len(key) != 64 {
+			return false
+		}
+	case x25519.PrivateKey:
+		if len(key) != x25519.PrivateKeySize {
+			return false
+		}
+	case x25519.PublicKey:
+		if len(key) != x25519.PublicKeySize {
 			return false
 		}
 	default:
@@ -578,6 +619,7 @@ func (key rawJSONWebKey) edPrivateKey() (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("go-jose/go-jose: invalid Ed25519 private key, missing %s value(s)", strings.Join(missing, ", "))
 	}
 
+	// FIXME ed25519.NewKeyFromSeed() for Validate
 	privateKey := make([]byte, ed25519.PrivateKeySize)
 	copy(privateKey[0:32], key.D.bytes())
 	copy(privateKey[32:], key.X.bytes())
@@ -734,6 +776,58 @@ func fromEcPrivateKey(ec *ecdsa.PrivateKey) (*rawJSONWebKey, error) {
 	raw.D = newFixedSizeBuffer(ec.D.Bytes(), dSize(ec.PublicKey.Curve))
 
 	return raw, nil
+}
+
+func fromX25519PublicKey(pub x25519.PublicKey) (*rawJSONWebKey, error) {
+	return &rawJSONWebKey{
+		Kty: "OKP",
+		Crv: "X25519",
+		X:   newBuffer(pub),
+	}, nil
+}
+
+func fromX25519PrivateKey(priv x25519.PrivateKey) (*rawJSONWebKey, error) {
+	pub, err := priv.Public()
+	if err != nil {
+		return nil, err
+	}
+
+	return &rawJSONWebKey{
+		Kty: "OKP",
+		Crv: "X25519",
+		D:   newBuffer(priv),
+		X:   newBuffer(pub),
+	}, nil
+}
+
+func (key rawJSONWebKey) x25519PrivateKey() (x25519.PrivateKey, error) {
+	var missing []string
+	switch {
+	case key.D == nil:
+		missing = append(missing, "D")
+	case key.X == nil:
+		missing = append(missing, "X")
+	}
+
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("go-jose/go-jose: invalid x25519 private key, missing %s value(s)", strings.Join(missing, ", "))
+	}
+
+	privateKey := make([]byte, x25519.PrivateKeySize)
+	copy(privateKey, key.D.bytes())
+	// copy(privateKey[32:], key.X.bytes())
+	rv := x25519.PrivateKey(privateKey)
+	return rv, nil
+}
+
+func (key rawJSONWebKey) x25519PublicKey() (x25519.PublicKey, error) {
+	if key.X == nil {
+		return nil, fmt.Errorf("go-jose/go-jose: invalid x25519 key, missing x value")
+	}
+	publicKey := make([]byte, x25519.PublicKeySize)
+	copy(publicKey[0:32], key.X.bytes())
+	rv := x25519.PublicKey(publicKey)
+	return rv, nil
 }
 
 // dSize returns the size in octets for the "d" member of an elliptic curve

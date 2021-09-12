@@ -22,9 +22,16 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/hex"
 	"math/big"
 	"regexp"
+	"strings"
 	"testing"
+
+	"github.com/go-jose/go-jose/v3/x25519"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCompactParseJWE(t *testing.T) {
@@ -677,4 +684,37 @@ func TestJWEWithNullAlg(t *testing.T) {
 	if _, err := ParseEncrypted(serialized); err == nil {
 		t.Error(err)
 	}
+}
+
+func TestJWEX25519(t *testing.T) {
+	// Alice's private key, a:
+	alicePriv := "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"
+
+	plain := "Secret Text."
+	jweText := "eyJhbGciOiJFQ0RILUVTIiwiZW5jIjoiQTI1NkdDTSIsImVwayI6eyJ4Ijoic3R0TTJKSm03Q1F2dGc4UDdUNnVRM1otZlQ5Z3FwTFRPaVdER0cxVzhrdyIsImNydiI6IlgyNTUxOSIsImt0eSI6Ik9LUCJ9fQ..RQg5vbwwIevYSkzi.8a-dvVMAU8bhGE7s.T45oyg-C_fiRqMI24uh1jg"
+	header := stripWhitespace(`{
+		"alg":"ECDH-ES",
+		"enc":"A256GCM",
+		"epk":{
+			"x":"sttM2JJm7CQvtg8P7T6uQ3Z-fT9gqpLTOiWDGG1W8kw",
+			"crv":"X25519",
+			"kty":"OKP"
+		}
+	}`)
+
+	// jweText's header
+	parts := strings.Split(jweText, ".")
+	require.Equal(t, 5, len(parts))
+	h, err := base64.RawURLEncoding.DecodeString(parts[0])
+	require.Equal(t, header, string(h))
+
+	alicePrivBytes, err := hex.DecodeString(alicePriv)
+	require.NoError(t, err)
+	alicePrivKey := x25519.PrivateKey(alicePrivBytes)
+
+	jwe, err := ParseEncrypted(jweText)
+	require.NoError(t, err)
+	decrypted, err := jwe.Decrypt(alicePrivKey)
+	require.NoError(t, err)
+	assert.Equal(t, plain, string(decrypted))
 }

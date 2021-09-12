@@ -76,6 +76,17 @@ Encrypt and then decrypt a test message (EC).
   > jose-util decrypt --key ec.key
   Lorem ipsum dolor sit amet
 
+Encrypt and then decrypt a test message (X25519).
+
+  $ jose-util generate-key --use enc --alg ECDH-ES --kid x25519test --size 255 && ls jwk-enc-x25519test-*.json
+  jwk-enc-x25519test-priv.json
+  jwk-enc-x25519test-pub.json
+
+  $ echo "Lorem ipsum dolor sit amet" |
+  > jose-util encrypt --alg ECDH-ES+A128KW --enc A128GCM --key jwk-enc-x25519test-pub.json |
+  > jose-util decrypt --key jwk-enc-x25519test-priv.json
+  Lorem ipsum dolor sit amet
+
 Sign and verify a test message (RSA).
 
   $ echo "Lorem ipsum dolor sit amet" |

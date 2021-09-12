@@ -24,6 +24,7 @@ import (
 	"reflect"
 
 	"github.com/go-jose/go-jose/v3/json"
+	"github.com/go-jose/go-jose/v3/x25519"
 )
 
 // Encrypter represents an encrypter which produces an encrypted JWE object.
@@ -168,21 +169,34 @@ func NewEncrypter(enc ContentEncryption, rcpt Recipient, opts *EncrypterOptions)
 		return encrypter, nil
 	case ECDH_ES:
 		// ECDH-ES (w/o key wrapping) is similar to DIRECT mode
-		typeOf := reflect.TypeOf(rawKey)
-		if typeOf != reflect.TypeOf(&ecdsa.PublicKey{}) {
+		switch rawKey.(type) {
+		case *ecdsa.PublicKey:
+			encrypter.keyGenerator = ecKeyGenerator{
+				size:      encrypter.cipher.keySize(),
+				algID:     string(enc),
+				publicKey: rawKey.(*ecdsa.PublicKey),
+			}
+			recipientInfo, _ := newECDHRecipient(rcpt.Algorithm, rawKey.(*ecdsa.PublicKey))
+			recipientInfo.keyID = keyID
+			if rcpt.KeyID != "" {
+				recipientInfo.keyID = rcpt.KeyID
+			}
+			encrypter.recipients = []recipientKeyInfo{recipientInfo}
+		case x25519.PublicKey:
+			encrypter.keyGenerator = x25519KeyGenerator{
+				size:      encrypter.cipher.keySize(),
+				algID:     string(enc),
+				publicKey: rawKey.(x25519.PublicKey),
+			}
+			recipientInfo, _ := newECDHRecipient2(rcpt.Algorithm, rawKey.(x25519.PublicKey))
+			recipientInfo.keyID = keyID
+			if rcpt.KeyID != "" {
+				recipientInfo.keyID = rcpt.KeyID
+			}
+			encrypter.recipients = []recipientKeyInfo{recipientInfo}
+		default:
 			return nil, ErrUnsupportedKeyType
 		}
-		encrypter.keyGenerator = ecKeyGenerator{
-			size:      encrypter.cipher.keySize(),
-			algID:     string(enc),
-			publicKey: rawKey.(*ecdsa.PublicKey),
-		}
-		recipientInfo, _ := newECDHRecipient(rcpt.Algorithm, rawKey.(*ecdsa.PublicKey))
-		recipientInfo.keyID = keyID
-		if rcpt.KeyID != "" {
-			recipientInfo.keyID = rcpt.KeyID
-		}
-		encrypter.recipients = []recipientKeyInfo{recipientInfo}
 		return encrypter, nil
 	default:
 		// Can just add a standard recipient
@@ -262,6 +276,8 @@ func makeJWERecipient(alg KeyAlgorithm, encryptionKey interface{}) (recipientKey
 		return newRSARecipient(alg, encryptionKey)
 	case *ecdsa.PublicKey:
 		return newECDHRecipient(alg, encryptionKey)
+	case x25519.PublicKey:
+		return newECDHRecipient2(alg, encryptionKey)
 	case []byte:
 		return newSymmetricRecipient(alg, encryptionKey)
 	case string:
@@ -286,6 +302,10 @@ func newDecrypter(decryptionKey interface{}) (keyDecrypter, error) {
 		}, nil
 	case *ecdsa.PrivateKey:
 		return &ecDecrypterSigner{
+			privateKey: decryptionKey,
+		}, nil
+	case x25519.PrivateKey:
+		return &x25519DecrypterSigner{
 			privateKey: decryptionKey,
 		}, nil
 	case []byte:
